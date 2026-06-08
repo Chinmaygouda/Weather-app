@@ -1,0 +1,363 @@
+<!-- SVG Gooey Filter Definition -->
+<svg style="width:0;height:0;position:absolute;" aria-hidden="true" focusable="false">
+  <defs>
+    <filter id="gooey">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="15" result="blur" />
+      <feColorMatrix in="blur" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 30 -10" result="gooey" />
+      <feComposite in="SourceGraphic" in2="gooey" operator="atop" />
+    </filter>
+    <!-- Turbulence filter for volatile weather -->
+    <filter id="turbulence">
+      <feTurbulence type="fractalNoise" baseFrequency="0.015" numOctaves="3" result="noise" />
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="12" xChannelSelector="R" yChannelSelector="G" />
+    </filter>
+  </defs>
+</svg>
+
+<ion-content scrollY="false" class="void-content" [class.ar-active]="isARActive">
+  <!-- Particle Background for Sensory Immersion -->
+  <canvas #particleCanvas class="particle-canvas"
+          [style.transform]="'translate(calc(var(--parallax-x) * -0.8), calc(var(--parallax-y) * -0.8))'"></canvas>
+
+  <!-- Camera target for web implementation -->
+  <div id="cameraPreview" class="camera-preview-container"></div>
+
+  <!-- The UI Color goes Pitch Black when viewing Shadow Weather -->
+  <div class="void"
+       [style.transform]="'translate(calc(var(--parallax-x) * 0.2), calc(var(--parallax-y) * 0.2))'"
+       [class.shadow-realm-active]="isShadowRealm"
+       [class.morning-theme]="isDayTime && !isShadowRealm"
+       [class.night-theme]="!isDayTime && !isShadowRealm"
+       [class.state-calm]="atmosState?.physicalState === 'calm'"
+       [class.state-volatile]="atmosState?.physicalState === 'volatile'"
+       [class.state-weeping]="atmosState?.physicalState === 'weeping'"
+       [class.state-frozen]="atmosState?.physicalState === 'frozen'">
+
+
+    <!-- Wind Vector Overlay -->
+    <div class="vector-horizon"
+         [style.transform]="'translate(calc(-50% + var(--parallax-x) * 0.4), calc(-50% + var(--parallax-y) * 0.4))'">
+      <div class="vector-line" [style.transform]="'rotate(' + windDirection + 'deg)'">
+        <div class="arrow-head"></div>
+      </div>
+      <div class="vector-label">{{ windSpeed }} KM/H</div>
+    </div>
+
+    <!-- Orbital Time Ring -->
+    <div class="orbital-ring" *ngIf="atmosState && !isLoading"
+         [style.transform]="'translate(calc(-50% + var(--parallax-x) * 0.5), calc(-50% + var(--parallax-y) * 0.5))'">
+      <svg viewBox="0 0 300 300" class="orbital-svg">
+        <circle cx="150" cy="150" r="130" class="orbital-track" />
+        <circle cx="150" cy="150" r="130" class="orbital-progress"
+                [style.strokeDashoffset]="orbitalOffset" />
+        <!-- Hour markers -->
+        <g *ngFor="let marker of hourMarkers">
+          <circle [attr.cx]="marker.x" [attr.cy]="marker.y" r="2"
+                  [class.active]="marker.active"
+                  class="hour-dot" />
+          <text *ngIf="marker.showLabel" [attr.x]="marker.lx" [attr.y]="marker.ly"
+                class="hour-label">{{ marker.label }}</text>
+        </g>
+      </svg>
+    </div>
+
+    <!-- Title Vibe — now with adaptive typography -->
+    <div class="vibe-text" *ngIf="atmosState?.vibe && !isShadowRealm"
+         [style.fontWeight]="vibeWeight"
+         [style.letterSpacing]="vibeSpacing"
+         [style.transform]="'translate(calc(var(--parallax-x) * 0.3), calc(var(--parallax-y) * 0.3))'">
+      {{ atmosState.vibe | uppercase }}
+    </div>
+
+    <!-- UV Flare Overlay (Celestial Alignment) -->
+    <div class="uv-flare-overlay" *ngIf="atmosState?.uvIndex >= 6"
+         [style.transform]="'translate(calc(var(--parallax-x) * -0.2), calc(var(--parallax-y) * -0.2))'"></div>
+
+    <!-- Hidden Shadow Title appears only on Long Press -->
+    <div class="vibe-text shadow-title" *ngIf="isShadowRealm"
+         [style.transform]="'translate(calc(var(--parallax-x) * 0.3), calc(var(--parallax-y) * 0.3))'">
+      THE SHADOW LAYER
+    </div>
+
+    <!-- Dream Title appears only when offline/isolated -->
+    <div class="vibe-text dream-title" *ngIf="isDreaming"
+         [style.transform]="'translate(calc(var(--parallax-x) * 0.3), calc(var(--parallax-y) * 0.3))'">
+      ISOLATED / PRECOGNITIVE DREAMING
+    </div>
+
+    <!-- Holographic time readout -->
+    <div class="time-rift" [class.visible]="selectedHour !== null"
+         [style.transform]="'translate(calc(-50% + var(--parallax-x) * 0.8), calc(-180px + var(--parallax-y) * 0.8))'">
+      {{ selectedHour }}H | {{ selectedTemp }}°
+    </div>
+
+    <!-- 1. THE SINGULARITY (Centerpiece) -->
+    <div class="singularity-container"
+         [style.transform]="'translate(calc(-50% + var(--parallax-x)), calc(-50% + var(--parallax-y))) rotateY(' + gyroRotation + 'deg)'"
+         (touchstart)="startDeepPress()"
+         (mousedown)="startDeepPress()"
+         (touchend)="endDeepPress()"
+         (mouseup)="endDeepPress()">
+
+      <!-- Shimmering Ozone Shield Glow (renders only on high UV index) -->
+      <div class="ozone-shield" *ngIf="atmosState?.uvIndex >= 5"></div>
+
+      <!-- Warm Radiation Theme (renders when location is hot) -->
+      <div class="warm-radiation" *ngIf="atmosState?.temp >= 28"></div>
+
+      <!-- Cold Aura Theme (renders when location is cold) -->
+      <div class="cold-aura" *ngIf="atmosState?.temp <= 18"></div>
+
+      <div class="singularity" #anomalyElement
+           [class.calm]="atmosState?.physicalState === 'calm'"
+           [class.volatile]="atmosState?.physicalState === 'volatile'"
+           [class.weeping]="atmosState?.physicalState === 'weeping'"
+           [class.frozen]="atmosState?.physicalState === 'frozen'"
+           [class.deep-freeze]="atmosState?.temp <= 10"
+           [class.dreaming]="isDreaming"
+           [class.loading]="isLoading"
+           [class.compressed]="isPressing"
+           [class.full-moon-glow]="moonPhaseName === 'Full Moon'"
+           [class.particulate-distortion]="atmosState?.aqi > 100">
+        <div class="singularity-face"></div>
+
+        <div class="loader-pulse" *ngIf="isLoading">SYNTHESIZING</div>
+
+
+
+        <!-- Data Wave -->
+        <div class="data-wave-container" [class.visible]="isDataWaveVisible">
+          <div class="wave-bar"
+               *ngFor="let bar of waveData"
+               [style.height.%]="bar.height"
+               [style.background]="bar.color">
+            <div class="rain-pulse" [style.opacity]="bar.rainOpacity"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. DATA HUD (Visible Details) -->
+    <div class="hud-layer" [class.visible]="atmosState !== null"
+         [style.transform]="'translate(calc(var(--parallax-x) * 1.5), calc(var(--parallax-y) * 1.5))'">
+      <!-- Top Left: Vitality -->
+      <div class="data-node node-temp" *ngIf="atmosState?.temp != null">
+        <span class="label">TEMP</span>
+        <span class="value" [style.fontWeight]="vibeWeight">{{ atmosState?.temp }}°</span>
+      </div>
+
+      <!-- Top Right: Atmosphere -->
+      <div class="data-node node-humidity" *ngIf="atmosState?.humidity != null">
+        <span class="label">HUMIDITY</span>
+        <span class="value">{{ atmosState?.humidity }}%</span>
+      </div>
+
+      <!-- Mid Left: UV Shield -->
+      <div class="data-node node-uv" *ngIf="atmosState?.uvIndex != null">
+        <span class="label">UV SHIELD</span>
+        <span class="value" style="font-size: 1.5rem; font-weight: 300; margin-top: 5px;">{{ atmosState?.uvIndex }}</span>
+      </div>
+
+      <!-- Mid Right: Particulates -->
+      <div class="data-node node-aqi" *ngIf="atmosState?.aqi != null">
+        <span class="label">PARTICULATES</span>
+        <span class="value" style="font-size: 1.5rem; font-weight: 300; margin-top: 5px;">{{ atmosState?.aqi }} AQI</span>
+      </div>
+
+      <!-- Bottom: The Oracle's Biological Impact & Historical Comparison -->
+      <div class="oracle-stream" *ngIf="atmosState?.biologicalImpact && !isLoading && !isShadowRealm">
+        <div class="bio-text">{{ atmosState?.biologicalImpact }}</div>
+
+        <div class="historical-comparison" *ngIf="atmosState?.historicalComparison">
+          [ 10 Years Ago: {{ atmosState?.historicalComparison }} ]
+        </div>
+      </div>
+    </div>
+
+    <!-- Atmospheric Nostalgia: Revealed only when stretching the dimension -->
+    <div class="shadow-insight" [class.visible]="isShadowRealm">
+      {{ atmosState?.atmosphericNostalgia }}
+    </div>
+
+    <div class="interaction-hint" *ngIf="!atmosState && !isLoading">
+      [ Tap: Sample Current | Hold: Peer into the Shadow Realm ]
+    </div>
+
+  </div>
+
+  <!-- Extreme Locations Link -->
+  <div class="ley-lines-link" (click)="toggleLeyLines()"
+       (mouseenter)="setTooltip('Extremes: Teleport to Hottest/Coolest')"
+       (mouseleave)="clearTooltip()"
+       (touchstart)="setTooltip('Extremes: Teleport to Hottest/Coolest')">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512">
+      <path fill="currentColor" d="M519.4 288.4c-7.7 0-14.9 3-20.3 8L377.5 226l12.1-50.5c3.2.3 6.4.5 9.7.5c35.3 0 64-28.7 64-64s-28.7-64-64-64s-64 28.7-64 64c0 18.3 7.7 34.8 20.1 46.6L315.5 226l-122.2 71.2c-5.4-5-12.6-8-20.3-8c-17.7 0-32 14.3-32 32s14.3 32 32 32s32-14.3 32-32c0-2.2-.2-4.3-.7-6.4l120-69.9l40.1 167.5c-9.9 5.7-16.7 16.3-16.7 28.6c0 17.7 14.3 32 32 32s32-14.3 32-32c0-12.3-6.8-22.9-16.7-28.6l40.1-167.5l120 69.9c-.4 2.1-.7 4.2-.7 6.4c0 17.7 14.3 32 32 32s32-14.3 32-32s-14.3-32-32-32z"/>
+    </svg>
+  </div>
+
+  <!-- Search Coordinates Link -->
+  <div class="search-link" (click)="toggleSearchOverlay()"
+       (mouseenter)="setTooltip('Coordinates: Search New Horizon')"
+       (mouseleave)="clearTooltip()"
+       (touchstart)="setTooltip('Coordinates: Search New Horizon')">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+      <!-- FontAwesome Globe Icon path -->
+      <path fill="currentColor" d="M352 256c0 22.2-1.2 43.6-3.3 64H163.3c-2.1-20.4-3.3-41.8-3.3-64s1.2-43.6 3.3-64H348.7c2.1 20.4 3.3 41.8 3.3 64zm28.8-64H503.9c5.3 20.5 8.1 41.9 8.1 64s-2.8 43.5-8.1 64H380.8c2.1-20.6 3.2-42 3.2-64s-1.1-43.4-3.2-64zm112.6-32H376.7c-10-63.9-29.8-117.4-55.3-151.6c78.3 20.7 142 77.5 171.9 151.6zm-149.1 0H167.7c6.1-36.4 15.5-68.6 27-94.7c10.5-23.6 22.2-40.7 33.5-51.5C239.4 3.2 248.7 0 256 0s16.6 3.2 27.8 13.8c11.3 10.8 23 27.9 33.5 51.5c11.6 26.1 20.9 58.3 27 94.7zm-209 0H18.6C48.6 85.9 112.2 29.1 190.6 8.4C165.1 42.6 145.3 96.1 135.3 160zM8.1 192H131.2c-2.1 20.6-3.2 42-3.2 64s1.1 43.4 3.2 64H8.1C2.8 299.5 0 278.1 0 256s2.8-43.5 8.1-64zM194.7 446.6c-11.6-26.1-20.9-58.3-27-94.7H344.3c-6.1 36.4-15.5 68.6-27 94.7c-10.5 23.6-22.2 40.7-33.5 51.5C272.6 508.8 263.3 512 256 512s-16.6-3.2-27.8-13.8c-11.3-10.8-23-27.9-33.5-51.5zM135.3 352c10 63.9 29.8 117.4 55.3 151.6C112.2 482.9 48.6 426.1 18.6 352H135.3zm358.1 0c-30 74.1-93.6 130.9-171.9 151.6c25.5-34.2 45.2-87.7 55.3-151.6H493.4z"/>
+    </svg>
+  </div>
+
+
+  <!-- Bottom Status Layer (Displays Location & Feature Tooltips) -->
+  <div class="bottom-status-layer" *ngIf="atmosState">
+    <div class="location-tag">
+      <!-- Glow indicator dot: Solid blue-gold if Home, pulsing green if normal GPS -->
+      <span class="location-dot" [class.home-dot]="isHomeLocationActive" [class.gps-dot]="!isHomeLocationActive"></span>
+
+      <!-- Location name display -->
+      <span class="location-name">{{ locationName | uppercase }}</span>
+
+      <!-- Dynamic Home / GPS Badge -->
+      <span class="location-badge" [class.home-badge]="isHomeLocationActive">
+        {{ isHomeLocationActive ? 'HOME' : 'GPS' }}
+      </span>
+
+      <!-- Interactive "Set / Remove Home" Icon Button with micro-tooltip -->
+      <button class="btn-home-toggle" (click)="toggleHomeLocation()"
+              (mouseenter)="setTooltip(isHomeLocationActive ? 'Home Location Locked' : 'Set as Home Location')"
+              (mouseleave)="clearTooltip()"
+              (touchstart)="setTooltip(isHomeLocationActive ? 'Home Location Locked' : 'Set as Home Location')">
+        <!-- SVG solid home icon (if active) -->
+        <svg *ngIf="isHomeLocationActive" class="home-icon active" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
+        </svg>
+        <!-- SVG outline home icon (if inactive) -->
+        <svg *ngIf="!isHomeLocationActive" class="home-icon inactive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Celestial Resonance Moon Phase Tag (visible only during nighttime) -->
+    <div class="location-tag moon-tag" *ngIf="!isDayTime" (click)="toggleMoonOverlay()" style="margin-top: 4px; cursor: pointer; pointer-events: auto;">
+      <span class="location-dot" style="background: #a8c8ff; box-shadow: 0 0 8px #a8c8ff; animation: moonPulse 2s infinite ease-in-out;"></span>
+      <span class="location-name" style="color: #a8c8ff;">LUNAR CYCLES // {{ moonPhaseName | uppercase }}</span>
+    </div>
+
+    <div class="tooltip-tag" [class.visible]="activeFeatureTooltip !== ''">
+      // {{ activeFeatureTooltip | uppercase }}
+    </div>
+  </div>
+
+  <!-- AR Overlay -->
+  <div class="ar-lighting-overlay" *ngIf="isARActive"
+       [style.boxShadow]="'inset 0 15vh 40vh 15vh ' + (atmosState?.skyColorHex || '#000000') + '33'">
+  </div>
+
+  <!-- Extreme Locations Overlay -->
+  <div class="ley-overlay" *ngIf="isLeyLinesVisible" [class.active]="isLeyLinesVisible">
+    <div class="ley-glass-panel">
+      <div class="ley-header">⚡ GLOBAL EXTREMES</div>
+      <div class="ley-subtitle">TELEPORT TO EARTH'S MOST INTENSE ATMOSPHERES</div>
+      <div class="ley-list">
+        <div class="ley-item" (click)="teleportToLeyLine({ name: 'Death Valley', region: 'California, USA', lat: 36.53, lon: -116.93, badge: '🔥 Scorching' })">
+          <div class="ley-badge">🔥</div>
+          <div class="ley-info">
+            <div class="ley-name">Death Valley</div>
+            <div class="ley-region">California, USA</div>
+            <div class="ley-desc">The Hottest Place on Earth</div>
+          </div>
+          <div class="ley-arrow">→</div>
+        </div>
+        <div class="ley-item" (click)="teleportToLeyLine({ name: 'Yakutsk', region: 'Siberia, Russia', lat: 62.03, lon: 129.73, badge: '❄️ Frozen' })">
+          <div class="ley-badge">❄️</div>
+          <div class="ley-info">
+            <div class="ley-name">Yakutsk</div>
+            <div class="ley-region">Siberia, Russia</div>
+            <div class="ley-desc">The Coldest Inhabited City</div>
+          </div>
+          <div class="ley-arrow">→</div>
+        </div>
+        <div class="ley-item" (click)="teleportToLeyLine({ name: 'Mawsynram', region: 'Meghalaya, India', lat: 25.29, lon: 91.58, badge: '🌧️ Deluge' })">
+          <div class="ley-badge">🌧️</div>
+          <div class="ley-info">
+            <div class="ley-name">Mawsynram</div>
+            <div class="ley-region">Meghalaya, India</div>
+            <div class="ley-desc">The Wettest Place on Earth</div>
+          </div>
+          <div class="ley-arrow">→</div>
+        </div>
+        <div class="ley-item" (click)="teleportToLeyLine({ name: 'Atacama Desert', region: 'Chile', lat: -24.5, lon: -69.25, badge: '☀️ Arid' })">
+          <div class="ley-badge">☀️</div>
+          <div class="ley-info">
+            <div class="ley-name">Atacama Desert</div>
+            <div class="ley-region">Chile</div>
+            <div class="ley-desc">The Driest Non-polar Desert</div>
+          </div>
+          <div class="ley-arrow">→</div>
+        </div>
+        <div class="ley-item" (click)="teleportToLeyLine({ name: 'Mount Washington', region: 'New Hampshire, USA', lat: 44.27, lon: -71.3, badge: '🌪️ Violent' })">
+          <div class="ley-badge">🌪️</div>
+          <div class="ley-info">
+            <div class="ley-name">Mount Washington</div>
+            <div class="ley-region">New Hampshire, USA</div>
+            <div class="ley-desc">Record-breaking Wind Gusts</div>
+          </div>
+          <div class="ley-arrow">→</div>
+        </div>
+      </div>
+      <button class="btn-cancel" style="align-self:center;margin-top:10px" (click)="toggleLeyLines()">ABORT</button>
+    </div>
+  </div>
+  <div class="search-overlay" *ngIf="isSearchOverlayVisible" [class.active]="isSearchOverlayVisible">
+    <div class="search-glass-panel">
+      <div class="search-header">ENTER COORDINATES / LOCATION</div>
+      <input type="text" class="search-input" placeholder="e.g. Tokyo, London, 40.71,-74.00" [(ngModel)]="searchQuery" (keyup.enter)="executeSearch()">
+
+      <div class="search-results-list" *ngIf="searchResults.length > 0">
+        <div class="search-result-item" *ngFor="let res of searchResults" (click)="selectLocation(res)">
+          {{ res.name }}<span *ngIf="res.admin1">, {{ res.admin1 }}</span> <span class="country">[{{ res.country }}]</span>
+        </div>
+      </div>
+      <div class="search-loading" *ngIf="isSearching">CALCULATING TRAJECTORY...</div>
+
+      <div class="search-footer">
+        <button class="btn-cancel" (click)="toggleSearchOverlay()">ABORT</button>
+        <button class="btn-search" (click)="executeSearch()">SEARCH</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Celestial Resonance Moon Detail Overlay -->
+  <div class="moon-detail-overlay" *ngIf="showMoonOverlay" [class.active]="showMoonOverlay">
+    <div class="moon-glass-panel">
+      <div class="moon-giant-icon">{{ moonPhaseIcon }}</div>
+      <div class="moon-phase-title">{{ moonPhaseName | uppercase }}</div>
+      <div class="moon-completion">
+        <div class="moon-bar-track">
+          <div class="moon-bar-fill" [style.width.%]="moonPhase * 100"></div>
+        </div>
+        <span class="moon-pct">{{ (moonPhase * 100).toFixed(1) }}% of cycle</span>
+      </div>
+      <div class="moon-stargazing">
+        <div class="star-row" *ngIf="moonPhase < 0.1875 || moonPhase > 0.9375">
+          ✦ <span>Optimal stargazing conditions — darkest skies</span>
+        </div>
+        <div class="star-row" *ngIf="moonPhase >= 0.4375 && moonPhase <= 0.5625">
+          ✦ <span>Full moon — poor stargazing, bright night sky</span>
+        </div>
+        <div class="star-row" *ngIf="moonPhase > 0.1875 && moonPhase < 0.4375">
+          ✦ <span>Waxing phase — partial illumination rising</span>
+        </div>
+        <div class="star-row" *ngIf="moonPhase > 0.5625 && moonPhase < 0.9375">
+          ✦ <span>Waning phase — illumination declining</span>
+        </div>
+        <div class="star-row">
+          ✦ <span>Lunar cycle progress: {{ (moonPhase * 29.53).toFixed(1) }} / 29.5 days</span>
+        </div>
+      </div>
+      <button class="btn-cancel" style="align-self:center;margin-top:10px" (click)="toggleMoonOverlay()">CLOSE</button>
+    </div>
+  </div>
+
+
+</ion-content>
