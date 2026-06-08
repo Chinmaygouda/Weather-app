@@ -13,12 +13,15 @@ describe('HomePage', () => {
   const mockGemini = jasmine.createSpyObj('GeminiAtmosService', ['interpretWeather']);
   const mockEnvironment = jasmine.createSpyObj('EnvironmentTrackerService', ['getLiveAtmosphere', 'loadCachedForecast']);
   const mockAudio = jasmine.createSpyObj('AudioManagerService', ['initializeAudio', 'fadeToState', 'setWeatherMood']);
-  const mockProfile = jasmine.createSpyObj('UserProfileService', ['loadSensitivities', 'saveSensitivities']);
+  const mockProfile = jasmine.createSpyObj('UserProfileService', ['loadSensitivities', 'saveSensitivities', 'isFirstLaunch', 'setFirstLaunchComplete', 'loadHomeLocation']);
   const mockAlert = jasmine.createSpyObj('AlertController', ['create']);
   const mockGesture = jasmine.createSpyObj('GestureController', ['create']);
 
   beforeEach(async () => {
     mockProfile.loadSensitivities.and.returnValue(Promise.resolve({ migraines: false, mood: false, allergies: false }));
+    mockProfile.isFirstLaunch.and.returnValue(Promise.resolve(false));
+    mockProfile.loadHomeLocation.and.returnValue(Promise.resolve(null));
+    mockGesture.create.and.returnValue({ enable: () => {} });
     
     await TestBed.configureTestingModule({
       imports: [HomePage],
@@ -35,8 +38,9 @@ describe('HomePage', () => {
     fixture = TestBed.createComponent(HomePage);
     component = fixture.componentInstance;
     
-    // Stub initial atmospheric load to prevent network calls in tests
+    // Stub initial atmospheric load and heavy view init to prevent network/canvas work in tests
     spyOn(component, 'summonAtmosphere').and.returnValue(Promise.resolve());
+    spyOn(component as any, 'initParticleSystem');
     
     fixture.detectChanges();
   });
@@ -69,8 +73,8 @@ describe('HomePage', () => {
 
   it('should scrub time when a wrist flick event is dispatched', () => {
     component.isARActive = true;
-    component.lastHourAnalyzed = 12;
-    component.hourlyForecastData = { temperature_2m: new Array(24).fill(20) } as any;
+    (component as any).lastHourAnalyzed = 12;
+    (component as any).hourlyForecastData = { temperature_2m: new Array(24).fill(20) } as any;
 
     spyOn(component, 'updateOrbitalRing');
     spyOn(component as any, 'summonHourForecast');
@@ -82,12 +86,12 @@ describe('HomePage', () => {
     
     (component as any).handleKineticMotion(event);
     
-    expect(component.lastHourAnalyzed).toBe(11); // Decremented hour
+    expect((component as any).lastHourAnalyzed).toBe(11); // Decremented hour
   });
 
   it('should trigger Ley Line teleportation on double shake', () => {
     component.isARActive = true;
-    component.hourlyForecastData = { temperature_2m: new Array(24).fill(20) } as any;
+    (component as any).hourlyForecastData = { temperature_2m: new Array(24).fill(20) } as any;
 
     spyOn(component as any, 'teleportToRandomLeyLine');
 

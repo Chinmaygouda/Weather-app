@@ -69,6 +69,7 @@ export class AudioManagerService {
     if (!this.isInitialized || newState === this.activeState) return;
 
     console.log(`Fading soundscape to: ${newState}`);
+    this._resumeLayers();
     this.activeState = newState;
 
     // Cancel any existing auto-stop countdown
@@ -107,15 +108,26 @@ export class AudioManagerService {
         this.audioContext.currentTime + AudioManagerService.FADE_DURATION
       );
     }
-    // Pause after the fade completes
+    // Pause after the fade completes (keep graph wired for reuse)
     setTimeout(() => {
       for (const key in this.audioLayers) {
         this.audioLayers[key as WeatherState].element.pause();
       }
       this.activeState = null;
-      this.isInitialized = false; // allow re-priming on next interaction
       console.log('Soundscape stopped.');
     }, AudioManagerService.FADE_DURATION * 1000 + 100);
+  }
+
+  private _resumeLayers() {
+    for (const key in this.audioLayers) {
+      const layer = this.audioLayers[key as WeatherState];
+      if (layer.element.paused) {
+        layer.element.play().catch(() => {});
+      }
+    }
+    if (this.audioContext?.state === 'suspended') {
+      this.audioContext.resume().catch(() => {});
+    }
   }
 
   private _clearStopTimer() {

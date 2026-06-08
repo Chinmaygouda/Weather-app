@@ -32,9 +32,9 @@ export class EnvironmentTrackerService {
       }
 
       const options: PositionOptions = {
-        enableHighAccuracy: true, // Request GPS Satellites over Wi-Fi/IP
-        timeout: 15000,           // 15 seconds for hard lock
-        maximumAge: 0             // STRICT: No cached "Bengaluru" data
+        enableHighAccuracy: retryCount === 0,
+        timeout: retryCount === 0 ? 6000 : 10000,
+        maximumAge: retryCount === 0 ? 120000 : 0
       };
 
       navigator.geolocation.getCurrentPosition(
@@ -62,13 +62,11 @@ export class EnvironmentTrackerService {
 
           console.table({ "[WATCHDOG] SENSOR DATA": metadata });
 
-          // VALIDATION RULE: Accuracy < 200m (Avoid IP-based Bengaluru hubs)
-          if (accuracy > 200 && retryCount < 2) {
+          if (accuracy > 200 && retryCount < 1) {
             console.warn(`[WATCHDOG] Accuracy (${accuracy}m) is too poor. Retrying for precision...`);
-            // Brief delay before retry to allow sensor warm-up
             setTimeout(() => {
               this.getHardwareCoordinates(retryCount + 1).then(resolve).catch(reject);
-            }, 1000);
+            }, 400);
             return;
           }
 
@@ -158,16 +156,16 @@ export class EnvironmentTrackerService {
       if (overrideLat !== undefined && overrideLon !== undefined) {
         finalLat = overrideLat;
         finalLon = overrideLon;
-        finalName = overrideName || await this.getLocationName(finalLat, finalLon);
+        finalName = overrideName || '';
         selectedSource = 'USER_OVERRIDE';
-        finalAccuracy = 0; // User initiated
+        finalAccuracy = 0;
       } else {
         // PRIORITY 1: High-Accuracy Watchdog GPS
         try {
           const gps = await this.getHardwareCoordinates();
           finalLat = gps.lat;
           finalLon = gps.lon;
-          finalName = await this.getLocationName(finalLat, finalLon);
+          finalName = '';
           selectedSource = gps.source;
           finalAccuracy = gps.accuracy;
         } catch (e) {
@@ -185,9 +183,9 @@ export class EnvironmentTrackerService {
               const ip = await this.getIPCoordinates();
               finalLat = ip.lat;
               finalLon = ip.lon;
-              finalName = await this.getLocationName(finalLat, finalLon);
+              finalName = '';
               selectedSource = `IP_FALLBACK (${ip.provider})`;
-              finalAccuracy = 2000; // IP is generally low confidence
+              finalAccuracy = 2000;
             } catch (ipE) {
               // PRIORITY 4: Emergency Default
               finalLat = EMERGENCY_DEFAULT.lat;
@@ -202,8 +200,22 @@ export class EnvironmentTrackerService {
 
       console.log(`[PIPELINE] FINAL SELECTION: ${finalName} via ${selectedSource} [${finalLat}, ${finalLon}] (Accuracy: ${finalAccuracy}m)`);
 
-      const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${finalLat}&longitude=${finalLon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m,wind_direction_10m,uv_index&hourly=temperature_2m,apparent_temperature,precipitation_probability,weather_code,uv_index&timezone=auto&forecast_days=1`);
+      const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${finalLat}&longitude=${finalLon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m,wind_direction_10m,uv_index&hourly=temperature_2m,apparent_temperature,precipitation_probability,weather_code,uv_index,relative_humidity_2m,wind_speed_10m&timezone=auto&forecast_days=1`;
+
+      const needsGeocode = !finalName;
+      const [resolvedName, weatherRes] = await Promise.all([
+        needsGeocode ? this.getLocationName(finalLat, finalLon) : Promise.resolve(finalName),
+        fetch(weatherUrl)
+      ]);
+      finalName = resolvedName;
+
+      if (!weatherRes.ok) {
+        throw new Error(`Weather API failed: ${weatherRes.status}`);
+      }
       const rawData = await weatherRes.json();
+      if (!rawData.current || !rawData.hourly) {
+        throw new Error('Weather API returned incomplete data');
+      }
       rawData.locationName = finalName;
       rawData.accuracy = finalAccuracy;
       rawData.source = selectedSource;

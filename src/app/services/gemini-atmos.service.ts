@@ -67,9 +67,6 @@ export class GeminiAtmosService {
       sensitivityAdvice: aqi > 100 ? "Air quality is poor; consider remaining in conditioned spaces." : "A good day for gentle movement outdoors."
     };
 
-    // Simulate network delay for UX consistency
-    await new Promise(resolve => setTimeout(resolve, 800));
-
     console.log(`ATMOS Realization (Local Mock):`, sentientData);
     return sentientData;
   }

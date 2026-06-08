@@ -1,4 +1,4 @@
-import { Component, ElementRef, HostBinding, HostListener, OnDestroy, OnInit, ViewChild, NgZone } from '@angular/core';
+import { Component, ElementRef, HostBinding, HostListener, OnDestroy, OnInit, ViewChild, NgZone, AfterViewInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { AlertController, GestureController, IonicModule } from '@ionic/angular';
 import { GeminiAtmosService } from '../services/gemini-atmos.service';
@@ -40,7 +40,7 @@ import { FormsModule } from '@angular/forms';
   standalone: true,
   imports: [CommonModule, IonicModule, FormsModule],
 })
-export class HomePage implements OnInit, OnDestroy {
+export class HomePage implements OnInit, AfterViewInit, OnDestroy {
   // Bind AR active class directly to the host component for styling
   @HostBinding('class.ar-active') isARActive = false;
 
@@ -153,6 +153,8 @@ export class HomePage implements OnInit, OnDestroy {
   // Internal State
   private lastHourAnalyzed = -1;
   private isAudioInitialized = false;
+  private isScrubbingOrbitalRing = false;
+  private readonly onResize = () => this.resizeCanvas();
 
   constructor(
     private geminiAI: GeminiAtmosService,
@@ -347,10 +349,11 @@ export class HomePage implements OnInit, OnDestroy {
 
   // --- PARTICLE SYSTEM ---
   private initParticleSystem() {
+    if (!this.particleCanvas?.nativeElement) return;
     const canvas = this.particleCanvas.nativeElement;
     this.ctx = canvas.getContext('2d')!;
     this.resizeCanvas();
-    window.addEventListener('resize', () => this.resizeCanvas());
+    window.addEventListener('resize', this.onResize);
     this.startParticleLoop();
   }
 
@@ -479,6 +482,7 @@ export class HomePage implements OnInit, OnDestroy {
 
   // --- SWIPE GESTURE TO REVEAL DATA WAVE ---
   private setupSwipeGesture() {
+    if (!this.anomalyElement?.nativeElement) return;
     const swipeGesture = this.gestureCtrl.create({
       el: this.anomalyElement.nativeElement,
       gestureName: 'swipe-up',
@@ -498,7 +502,7 @@ export class HomePage implements OnInit, OnDestroy {
   private generateDataWave() {
     if (!this.hourlyForecastData) return;
     const temps = this.hourlyForecastData.temperature_2m;
-    const rains = this.hourlyForecastData.precipitation_probability;
+    const rains = this.hourlyForecastData.precipitation_probability || [];
     const minTemp = Math.min(...temps);
     const maxTemp = Math.max(...temps);
 
@@ -508,7 +512,7 @@ export class HomePage implements OnInit, OnDestroy {
       return {
         height: 10 + (tempNormalized * 90),
         color: `hsl(${hue}, 90%, 65%)`,
-        rainOpacity: rains[index] / 100
+        rainOpacity: (rains[index] ?? 0) / 100
       };
     });
   }
@@ -521,7 +525,14 @@ export class HomePage implements OnInit, OnDestroy {
   // --- AR BRIDGE ACTIVATION ---
   toggleARMode() {
     this.isARActive = !this.isARActive;
-    // Feature removed
+    this.syncMotionListeners();
+  }
+
+  private syncMotionListeners() {
+    window.removeEventListener('devicemotion', this.handleKineticMotion);
+    if (this.isARActive && this.hourlyForecastData) {
+      window.addEventListener('devicemotion', this.handleKineticMotion);
+    }
   }
 
   // Helper to prime audio on first user gesture
@@ -568,7 +579,7 @@ export class HomePage implements OnInit, OnDestroy {
       this.isShadowRealm = false;
     } else {
       if (!this.isLoading) {
-        this.summonAtmosphere();
+        this.refreshAtmosphere();
       }
     }
   }
@@ -671,10 +682,20 @@ export class HomePage implements OnInit, OnDestroy {
     try { Haptics.notification({ type: 'SUCCESS' as any }); } catch(e) {}
   }
 
-  @HostListener('window:touchmove', ['$event'])
-  @HostListener('window:mousemove', ['$event'])
+  @HostListener('window:mouseup')
+  @HostListener('window:touchend')
+  stopOrbitalScrub() {
+    this.isScrubbingOrbitalRing = false;
+  }
+
+  startOrbitalScrub(event: Event) {
+    event.stopPropagation();
+    this.isScrubbingOrbitalRing = true;
+    this.onCircularScrub(event);
+  }
+
   onCircularScrub(event: any) {
-    if (!this.hourlyForecastData || this.isShadowRealm || this.isPressing || this.isLoading) return;
+    if (!this.isScrubbingOrbitalRing || !this.hourlyForecastData || this.isShadowRealm || this.isPressing || this.isLoading) return;
 
     const clientX = event.touches ? event.touches[0].clientX : event.clientX;
     const clientY = event.touches ? event.touches[0].clientY : event.clientY;
@@ -704,6 +725,25 @@ export class HomePage implements OnInit, OnDestroy {
     }
   }
 
+  private applyProvisionalAtmosState(rawCurrent: any) {
+    const temp = Math.round(rawCurrent?.temperature_2m ?? 20);
+    const humidity = Math.round(rawCurrent?.relative_humidity_2m ?? 50);
+    const aqi = rawCurrent?.aqi ?? 50;
+    const uv = rawCurrent?.uv_index ?? 0;
+
+    this.atmosState = {
+      ...this.atmosState,
+      temp: temp.toString(),
+      humidity: humidity.toString(),
+      aqi,
+      uvIndex: uv,
+      vibe: this.atmosState?.vibe ?? 'Loading',
+      skyColorHex: this.atmosState?.skyColorHex ?? '#87CEEB',
+      physicalState: this.atmosState?.physicalState ?? 'calm',
+      biologicalImpact: this.atmosState?.biologicalImpact ?? 'Reading the atmosphere...',
+    };
+  }
+
   private async triggerWeatherHaptics(state: string) {
     if (!state) return;
     try {
@@ -730,24 +770,36 @@ export class HomePage implements OnInit, OnDestroy {
   }
 
   private async summonHourForecast(hourIndex: number) {
-    if (!this.hourlyForecastData) return;
+    if (!this.hourlyForecastData?.time?.length) return;
+    hourIndex = Math.max(0, Math.min(hourIndex, this.hourlyForecastData.time.length - 1));
 
-    // Use a fixed hour index logic if needed, but hourlyForecastData from Open-Meteo
-    // for a 1-day forecast usually starts at 00:00.
+    const temp = this.hourlyForecastData.temperature_2m?.[hourIndex];
+    if (temp === undefined) return;
+
     this.selectedHour = new Date(this.hourlyForecastData.time[hourIndex]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    this.selectedTemp = Math.round(this.hourlyForecastData.temperature_2m[hourIndex]).toString();
+    this.selectedTemp = Math.round(temp).toString();
 
     // Dynamically update day/night status based on scrubbing hour index
     const scrubHour = new Date(this.hourlyForecastData.time[hourIndex]).getHours();
     this.isDayTime = scrubHour >= 6 && scrubHour < 18;
 
+    const humidity = this.hourlyForecastData.relative_humidity_2m?.[hourIndex]
+      ?? this.atmosState?.humidity
+      ?? 50;
+    const windSpeed = this.hourlyForecastData.wind_speed_10m?.[hourIndex] ?? 0;
+    const uvIndex = this.hourlyForecastData.uv_index?.[hourIndex] ?? 0;
+    const estimatedAqi = Math.max(10, Math.min(180, Math.round(15 + humidity * 0.5 - windSpeed * 0.4)));
+
     const hourContext = `
       Forecasted climate for a single future moment:
       - Time: ${this.selectedHour}
       - Temperature: ${this.selectedTemp}°C
-      - Feels Like: ${Math.round(this.hourlyForecastData.apparent_temperature[hourIndex])}°C
-      - Precipitation Probability: ${this.hourlyForecastData.precipitation_probability[hourIndex]}%
-      - Weather Code: ${this.hourlyForecastData.weather_code[hourIndex]}
+      - Feels Like: ${Math.round(this.hourlyForecastData.apparent_temperature?.[hourIndex] ?? temp)}°C
+      - Humidity: ${Math.round(Number(humidity))}%
+      - Precipitation Probability: ${this.hourlyForecastData.precipitation_probability?.[hourIndex] ?? 0}%
+      - Weather Code: ${this.hourlyForecastData.weather_code?.[hourIndex] ?? 0}
+      - UV Index: ${uvIndex}
+      - Air Quality Index (AQI): ${estimatedAqi}
     `;
 
     // Debounce AI Interpretation for scrubbing to avoid API spam
@@ -759,27 +811,36 @@ export class HomePage implements OnInit, OnDestroy {
       this.updateAdaptiveTypography();
       this.updateSingularityGlow();
 
-      this.audioManager.fadeToState(this.atmosState?.physicalState);
+      if (this.isAudioInitialized) {
+        this.audioManager.fadeToState(this.atmosState?.physicalState);
+        const temp = this.hourlyForecastData.temperature_2m[hourIndex];
+        const precip = this.hourlyForecastData.precipitation_probability ? this.hourlyForecastData.precipitation_probability[hourIndex] : 0;
+        this.audioManager.setWeatherMood(temp, precip);
+      }
       this.triggerWeatherHaptics(this.atmosState?.physicalState);
-
-      const temp = this.hourlyForecastData.temperature_2m[hourIndex];
-      const precip = this.hourlyForecastData.precipitation_probability ? this.hourlyForecastData.precipitation_probability[hourIndex] : 0;
-      this.audioManager.setWeatherMood(temp, precip);
     }, 400);
 
     try { await Haptics.selectionChanged(); } catch(e) {}
   }
 
+  /** Orb tap: reuse known coordinates so weather loads without another GPS lock. */
+  private refreshAtmosphere() {
+    if (this.currentLat !== null && this.currentLon !== null) {
+      this.summonAtmosphere(this.currentLat, this.currentLon, this.locationName);
+      return;
+    }
+    this.summonAtmosphere();
+  }
+
   // --- MAIN DATA FETCH ---
   async summonAtmosphere(overrideLat?: number, overrideLon?: number, overrideName?: string) {
-    if (!this.isAudioInitialized) {
-      await this.audioManager.initializeAudio();
-      this.isAudioInitialized = true;
-    }
+    const isQuickRefresh = overrideLat !== undefined && this.atmosState !== null;
     this.isLoading = true;
-    this.atmosState = null;
-    this.isDataWaveVisible = false;
-    this.isDreaming = false;
+    if (!isQuickRefresh) {
+      this.atmosState = null;
+      this.isDataWaveVisible = false;
+      this.isDreaming = false;
+    }
 
     try {
       if (overrideLat !== undefined) {
@@ -789,7 +850,7 @@ export class HomePage implements OnInit, OnDestroy {
       }
 
       const result = await this.environment.getLiveAtmosphere(overrideLat, overrideLon, overrideName);
-      const { currentContext, hourlyForecast, rawCurrent, locationName, latitude, longitude, accuracy, source } = result;
+      const { currentContext, hourlyForecast, rawCurrent, locationName, latitude, longitude } = result;
 
       this.hourlyForecastData = hourlyForecast;
       this.locationName = locationName;
@@ -800,18 +861,21 @@ export class HomePage implements OnInit, OnDestroy {
       this.windSpeed = rawCurrent?.wind_speed_10m || 0;
       this.isDayTime = rawCurrent?.is_day === 1;
 
+      this.applyProvisionalAtmosState(rawCurrent);
+
       this.atmosState = await this.geminiAI.interpretWeather(currentContext);
 
       // Post-processing
       this.updateAdaptiveTypography();
       this.updateSingularityGlow();
 
-      this.audioManager.fadeToState(this.atmosState?.physicalState);
+      if (this.isAudioInitialized) {
+        this.audioManager.fadeToState(this.atmosState?.physicalState);
+        const currentTemp = rawCurrent?.temperature_2m || 15;
+        const currentPrecip = rawCurrent?.precipitation || 0;
+        this.audioManager.setWeatherMood(currentTemp, currentPrecip);
+      }
       this.triggerWeatherHaptics(this.atmosState?.physicalState);
-
-      const currentTemp = rawCurrent?.temperature_2m || 15;
-      const currentPrecip = rawCurrent?.precipitation || 0;
-      this.audioManager.setWeatherMood(currentTemp, currentPrecip);
 
       this.generateDataWave();
 
@@ -820,9 +884,10 @@ export class HomePage implements OnInit, OnDestroy {
       this.selectedHour = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       this.selectedTemp = Math.round(rawCurrent?.temperature_2m || 15).toString();
 
-      // Ensure single listener
+      // Ensure motion listeners
       window.removeEventListener('deviceorientation', this.handleOrientation);
       window.addEventListener('deviceorientation', this.handleOrientation);
+      this.syncMotionListeners();
 
     } catch(err) {
       console.error("ENTERING PRECOGNITIVE DREAM STATE:", err);
@@ -844,11 +909,12 @@ export class HomePage implements OnInit, OnDestroy {
         this.updateAdaptiveTypography();
         this.updateSingularityGlow();
 
-        this.audioManager.fadeToState('dream');
-
-        const currentTemp = rawCurrent?.temperature_2m || 15;
-        const currentPrecip = rawCurrent?.precipitation || 0;
-        this.audioManager.setWeatherMood(currentTemp, currentPrecip);
+        if (this.isAudioInitialized) {
+          this.audioManager.fadeToState('dream');
+          const currentTemp = rawCurrent?.temperature_2m || 15;
+          const currentPrecip = rawCurrent?.precipitation || 0;
+          this.audioManager.setWeatherMood(currentTemp, currentPrecip);
+        }
 
         this.generateDataWave();
       } else {
@@ -864,6 +930,14 @@ export class HomePage implements OnInit, OnDestroy {
   async ngOnDestroy() {
     window.removeEventListener('deviceorientation', this.handleOrientation);
     window.removeEventListener('devicemotion', this.handleKineticMotion);
+    window.removeEventListener('resize', this.onResize);
+
+    if (this.animationId !== null) {
+      cancelAnimationFrame(this.animationId);
+      this.animationId = null;
+    }
+    clearTimeout(this.pressTimer);
+    clearTimeout(this.scrubDebounceTimeout);
 
     if (this.isARActive) {
       try {

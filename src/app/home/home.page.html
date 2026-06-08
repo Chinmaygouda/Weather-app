@@ -45,7 +45,11 @@
 
     <!-- Orbital Time Ring -->
     <div class="orbital-ring" *ngIf="atmosState && !isLoading"
-         [style.transform]="'translate(calc(-50% + var(--parallax-x) * 0.5), calc(-50% + var(--parallax-y) * 0.5))'">
+         [style.transform]="'translate(calc(-50% + var(--parallax-x) * 0.5), calc(-50% + var(--parallax-y) * 0.5))'"
+         (mousedown)="startOrbitalScrub($event)"
+         (touchstart)="startOrbitalScrub($event)"
+         (mousemove)="onCircularScrub($event)"
+         (touchmove)="onCircularScrub($event)">
       <svg viewBox="0 0 300 300" class="orbital-svg">
         <circle cx="150" cy="150" r="130" class="orbital-track" />
         <circle cx="150" cy="150" r="130" class="orbital-progress"
@@ -259,48 +263,12 @@
       <div class="ley-header">⚡ GLOBAL EXTREMES</div>
       <div class="ley-subtitle">TELEPORT TO EARTH'S MOST INTENSE ATMOSPHERES</div>
       <div class="ley-list">
-        <div class="ley-item" (click)="teleportToLeyLine({ name: 'Death Valley', region: 'California, USA', lat: 36.53, lon: -116.93, badge: '🔥 Scorching' })">
-          <div class="ley-badge">🔥</div>
+        <div class="ley-item" *ngFor="let line of leyLines" (click)="teleportToLeyLine(line)">
+          <div class="ley-badge">{{ line.badge.split(' ')[0] }}</div>
           <div class="ley-info">
-            <div class="ley-name">Death Valley</div>
-            <div class="ley-region">California, USA</div>
-            <div class="ley-desc">The Hottest Place on Earth</div>
-          </div>
-          <div class="ley-arrow">→</div>
-        </div>
-        <div class="ley-item" (click)="teleportToLeyLine({ name: 'Yakutsk', region: 'Siberia, Russia', lat: 62.03, lon: 129.73, badge: '❄️ Frozen' })">
-          <div class="ley-badge">❄️</div>
-          <div class="ley-info">
-            <div class="ley-name">Yakutsk</div>
-            <div class="ley-region">Siberia, Russia</div>
-            <div class="ley-desc">The Coldest Inhabited City</div>
-          </div>
-          <div class="ley-arrow">→</div>
-        </div>
-        <div class="ley-item" (click)="teleportToLeyLine({ name: 'Mawsynram', region: 'Meghalaya, India', lat: 25.29, lon: 91.58, badge: '🌧️ Deluge' })">
-          <div class="ley-badge">🌧️</div>
-          <div class="ley-info">
-            <div class="ley-name">Mawsynram</div>
-            <div class="ley-region">Meghalaya, India</div>
-            <div class="ley-desc">The Wettest Place on Earth</div>
-          </div>
-          <div class="ley-arrow">→</div>
-        </div>
-        <div class="ley-item" (click)="teleportToLeyLine({ name: 'Atacama Desert', region: 'Chile', lat: -24.5, lon: -69.25, badge: '☀️ Arid' })">
-          <div class="ley-badge">☀️</div>
-          <div class="ley-info">
-            <div class="ley-name">Atacama Desert</div>
-            <div class="ley-region">Chile</div>
-            <div class="ley-desc">The Driest Non-polar Desert</div>
-          </div>
-          <div class="ley-arrow">→</div>
-        </div>
-        <div class="ley-item" (click)="teleportToLeyLine({ name: 'Mount Washington', region: 'New Hampshire, USA', lat: 44.27, lon: -71.3, badge: '🌪️ Violent' })">
-          <div class="ley-badge">🌪️</div>
-          <div class="ley-info">
-            <div class="ley-name">Mount Washington</div>
-            <div class="ley-region">New Hampshire, USA</div>
-            <div class="ley-desc">Record-breaking Wind Gusts</div>
+            <div class="ley-name">{{ line.name }}</div>
+            <div class="ley-region">{{ line.region }}</div>
+            <div class="ley-desc">{{ line.desc }}</div>
           </div>
           <div class="ley-arrow">→</div>
         </div>

@@ -87,7 +87,9 @@
   top: 50%; left: 50%;
   width: 280px; height: 280px;
   transform: translate(-50%, -50%);
-  pointer-events: none;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: grab;
   z-index: 6;
 }
 .orbital-svg {
